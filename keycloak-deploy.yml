@@ -1,0 +1,90 @@
+version: '3'
+
+services:
+  keycloak:
+    image: ghcr.io/mark1708/bot-factory-keycloak:v2.0.9
+    command: start
+    depends_on:
+      - keycloak-db
+    volumes:
+      - /etc/localtime:/etc/localtime:ro
+    networks:
+      - keycloak-internal
+    deploy:
+      restart_policy:
+        condition: on-failure
+      mode: replicated
+      replicas: 1
+      placement:
+        constraints:
+          - "node.labels.keycloak==true"
+
+  keycloak-db:
+    image: postgres:10.1
+    environment:
+      - DB_VENDOR=postgres
+      - DB_DATABASE=keycloak
+      - DB_ADDR=keycloak-db
+      - DB_USER=keycloak
+      - DB_PASSWORD=changeme
+      - KEYCLOAK_USER=admin
+      - KEYCLOAK_PASSWORD=changeme
+      - PROXY_ADDRESS_FORWARDING=true # This is required to run keycloak behind traefik
+      - KEYCLOAK_HOSTNAME=auth.mark1708.ru
+      - POSTGRES_USER=keycloak
+      - POSTGRES_PASSWORD=changeme
+      - KEYCLOAK_LOGLEVEL=WARNING
+    volumes:
+      - /var/data/runtime/keycloak/database:/var/lib/postgresql/data
+      - /etc/localtime:/etc/localtime:ro
+    networks:
+      - keycloak-internal
+    deploy:
+      restart_policy:
+        condition: on-failure
+      mode: replicated
+      replicas: 1
+      placement:
+        constraints:
+          - "node.labels.keycloak==true"
+
+  keycloak-db-backup:
+    image: postgres:10.1
+    environment:
+      - PGHOST=keycloak-db
+      - PGUSER=keycloak
+      - PGPASSWORD=changeme
+      - BACKUP_NUM_KEEP=7
+      - BACKUP_FREQUENCY=1d
+    volumes:
+      - /var/data/keycloak/database-dump:/dump
+      - /etc/localtime:/etc/localtime:ro
+    entrypoint: |
+      bash -c 'bash -s <<EOF
+      trap "break;exit" SIGHUP SIGINT SIGTERM
+      sleep 2m
+      while /bin/true; do
+        pg_dump -Fc > /dump/dump_\`date +%d-%m-%Y"_"%H_%M_%S\`.psql
+        (ls -t /dump/dump*.psql|head -n $$BACKUP_NUM_KEEP;ls /dump/dump*.psql)|sort|uniq -u|xargs rm -- {}
+        sleep $$BACKUP_FREQUENCY
+      done
+      EOF'
+    networks:
+      - keycloak-internal
+    deploy:
+      restart_policy:
+        condition: on-failure
+      mode: replicated
+      replicas: 1
+      placement:
+        constraints:
+          - "node.labels.keycloak==true"
+
+networks:
+  keycloak-internal:
+    driver: overlay
+    ipam:
+      config:
+        # Setup unique static subnets for every stack you deploy.
+        # This avoids IP/gateway conflicts which can otherwise occur when you're creating/removing stacks a lot.
+        - subnet: 172.16.49.0/24
