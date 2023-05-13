@@ -3,7 +3,7 @@ version: '3'
 services:
   keycloak:
     image: ghcr.io/mark1708/bot-factory-keycloak:v2.0.9
-    command: start
+    command: start --import-realm --optimized
     depends_on:
       - keycloak-db
     volumes:
